@@ -12,11 +12,20 @@ load_dotenv()
 
 class Config:
     """Application configuration for Web QA Bot."""
-    
+
+    # Platform Selection
+    PLATFORM: str = os.getenv("PLATFORM", "GOOGLE").upper()  # GOOGLE or OPENAI
+
     # LLM Configuration
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-1.5-flash-latest")
-    
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+
+    # Model based on platform
+    if PLATFORM == "OPENAI":
+        LLM_MODEL: str = os.getenv("LLM_MODEL", "gpt-3.5-turbo")
+    else:  # GOOGLE
+        LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-1.5-flash-latest")
+
     # QA Settings
     MAX_CONTEXT_LENGTH: int = int(os.getenv("MAX_CONTEXT_LENGTH", "4000"))
     TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0.7"))

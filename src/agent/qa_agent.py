@@ -4,15 +4,27 @@ import logging
 import asyncio
 from typing import Dict, List, Any, AsyncGenerator, Optional
 import json
+import re
 
-from google import genai
-from google.genai import types
 from src.mcp_client.mcp_runner_client import MCPRunnerClient
 from src.prompts.qa_prompts import QAPrompts
 from src.prompts.agent_prompts import AgentPrompts
 from src.config import Config
-import re
-import json
+from src.skills.web_analyzer_skill import WebAnalyzerSkill
+
+# Conditional imports for LLM platforms
+try:
+    from google import genai
+    from google.genai import types
+    GOOGLE_AVAILABLE = True
+except ImportError:
+    GOOGLE_AVAILABLE = False
+
+try:
+    from openai import AsyncOpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +40,9 @@ class QAAgent:
 
         # Components
         self.mcp_client: Optional[MCPRunnerClient] = None
-        self.client = None
+        self.client = None  # Will be Google or OpenAI client
         self.mcp_tools = {}
+        self.web_analyzer = WebAnalyzerSkill()
 
         # Configuration
         self.config = Config()
@@ -40,10 +53,23 @@ class QAAgent:
             return
 
         try:
-            # Initialize GenAI Client
-            if self.config.GOOGLE_API_KEY:
-                self.client = genai.Client(api_key=self.config.GOOGLE_API_KEY)
-                logger.info(f"Initialized GenAI client for model: {self.config.LLM_MODEL}")
+            # Initialize LLM Client based on platform
+            if self.config.PLATFORM == "OPENAI":
+                if not OPENAI_AVAILABLE:
+                    raise ImportError("OpenAI library not installed. Please install with: pip install openai")
+                if self.config.OPENAI_API_KEY:
+                    self.client = AsyncOpenAI(api_key=self.config.OPENAI_API_KEY)  # For compatibility
+                    logger.info(f"Initialized OpenAI client for model: {self.config.LLM_MODEL}")
+                else:
+                    raise ValueError("OPENAI_API_KEY not configured")
+            else:  # GOOGLE
+                if not GOOGLE_AVAILABLE:
+                    raise ImportError("Google GenAI library not installed. Please install with: pip install google-genai")
+                if self.config.GOOGLE_API_KEY:
+                    self.client = genai.Client(api_key=self.config.GOOGLE_API_KEY)
+                    logger.info(f"Initialized Google GenAI client for model: {self.config.LLM_MODEL}")
+                else:
+                    raise ValueError("GOOGLE_API_KEY not configured")
 
             # Initialize MCP Client
             self.mcp_client = MCPRunnerClient(
@@ -170,17 +196,24 @@ class QAAgent:
         """Get list of available tools for agent reasoning"""
         tools_list = []
 
-        if not self.mcp_tools:
-            return tools_list
+        # Add built-in web analyzer skill
+        tools_list.append({
+            'name': 'web_analyzer',
+            'description': '웹 페이지 URL을 마크다운 형식으로 변환하여 내용을 추출합니다',
+            'server': 'builtin',
+            'parameters': ['url']
+        })
 
-        for server_name, tools in self.mcp_tools.items():
-            for tool in tools:
-                tools_list.append({
-                    'name': tool.name,
-                    'description': tool.description,
-                    'server': server_name,
-                    'parameters': list(tool.inputSchema.get('properties', {}).keys())
-                })
+        # Add MCP tools if available
+        if self.mcp_tools:
+            for server_name, tools in self.mcp_tools.items():
+                for tool in tools:
+                    tools_list.append({
+                        'name': tool.name,
+                        'description': tool.description,
+                        'server': server_name,
+                        'parameters': list(tool.inputSchema.get('properties', {}).keys())
+                    })
 
         return tools_list
 
@@ -190,20 +223,35 @@ class QAAgent:
             if not self.client:
                 return None
 
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.config.LLM_MODEL,
-                contents=reasoning_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.3,  # Lower temperature for more consistent reasoning
-                    top_p=0.9,
-                    top_k=40,
-                    max_output_tokens=2048,
-                )
-            )
+            response_text = ""
 
-            # Parse JSON response
-            response_text = response.text.strip()
+            if self.config.PLATFORM == "OPENAI":
+                # Use OpenAI API
+                response = await self.client.chat.completions.create(
+                    model=self.config.LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": "You are a helpful assistant that responds in JSON format."},
+                        {"role": "user", "content": reasoning_prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=2048,
+                    response_format={ "type": "json_object" }
+                )
+                response_text = response.choices[0].message.content
+            else:
+                # Use Google GenAI API
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.config.LLM_MODEL,
+                    contents=reasoning_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.3,  # Lower temperature for more consistent reasoning
+                        top_p=0.9,
+                        top_k=40,
+                        max_output_tokens=2048,
+                    )
+                )
+                response_text = response.text.strip()
 
             # Extract JSON from response
             json_start = response_text.find('{')
@@ -227,6 +275,31 @@ class QAAgent:
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a specific tool and return results"""
+
+        # Handle built-in web analyzer skill
+        if tool_name == 'web_analyzer':
+            try:
+                url = tool_args.get('url', '')
+                if not url:
+                    return {'success': False, 'error': 'URL parameter is required for web_analyzer'}
+
+                result = await self.web_analyzer.execute(url)
+                return {
+                    'success': result['success'],
+                    'result': result['result'],
+                    'error': result.get('error'),
+                    'tool_name': tool_name,
+                    'server': 'builtin'
+                }
+            except Exception as e:
+                logger.error(f"Error executing web_analyzer: {e}")
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'tool_name': tool_name
+                }
+
+        # Handle MCP tools
         if not self.mcp_client or not self.mcp_tools:
             return {'success': False, 'error': 'No MCP tools available'}
 
@@ -310,19 +383,34 @@ class QAAgent:
                 context=context
             )
 
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.config.LLM_MODEL,
-                contents=final_prompt,
-                config=types.GenerateContentConfig(
+            if self.config.PLATFORM == "OPENAI":
+                # Use OpenAI API
+                # Adjust max_tokens based on model
+                max_tokens = 4096 if "gpt-3.5" in self.config.LLM_MODEL else 8192
+                response = await self.client.chat.completions.create(
+                    model=self.config.LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": QAPrompts.SYSTEM_PROMPT},
+                        {"role": "user", "content": final_prompt}
+                    ],
                     temperature=self.config.TEMPERATURE,
-                    top_p=0.95,
-                    top_k=self.config.TOP_K,
-                    max_output_tokens=8192,
+                    max_tokens=max_tokens
                 )
-            )
-
-            return response.text
+                return response.choices[0].message.content
+            else:
+                # Use Google GenAI API
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.config.LLM_MODEL,
+                    contents=final_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=self.config.TEMPERATURE,
+                        top_p=0.95,
+                        top_k=self.config.TOP_K,
+                        max_output_tokens=8192,
+                    )
+                )
+                return response.text
 
         except Exception as e:
             logger.error(f"Error generating final response: {e}")
@@ -347,29 +435,45 @@ class QAAgent:
             self.conversation_history[context_id] = self.conversation_history[context_id][-20:]
     
     async def _generate_llm_response(self, prompt: str) -> str:
-        """Generate response using GenAI client"""
+        """Generate response using LLM client"""
         try:
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.config.LLM_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
+            if self.config.PLATFORM == "OPENAI":
+                # Use OpenAI API
+                # Adjust max_tokens based on model
+                max_tokens = 4096 if "gpt-3.5" in self.config.LLM_MODEL else 8192
+                response = await self.client.chat.completions.create(
+                    model=self.config.LLM_MODEL,
+                    messages=[
+                        {"role": "system", "content": QAPrompts.SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
                     temperature=self.config.TEMPERATURE,
-                    top_p=0.95,
-                    top_k=self.config.TOP_K,
-                    max_output_tokens=8192,
+                    max_tokens=max_tokens
                 )
-            )
-            return response.text
+                return response.choices[0].message.content
+            else:
+                # Use Google GenAI API
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.config.LLM_MODEL,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=self.config.TEMPERATURE,
+                        top_p=0.95,
+                        top_k=self.config.TOP_K,
+                        max_output_tokens=8192,
+                    )
+                )
+                return response.text
         except Exception as e:
-            logger.error(f"GenAI generation error: {e}")
+            logger.error(f"LLM generation error: {e}")
             # 사용자에게 친화적인 메시지로 변경
             error_str = str(e)
             if "overloaded" in error_str or "503" in error_str:
                 return "죄송합니다. 현재 서비스가 많이 사용되고 있어서 일시적으로 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요."
             elif "UNAVAILABLE" in error_str:
                 return "죄송합니다. 현재 AI 서비스에 일시적인 문제가 있습니다. 조금 후에 다시 시도해주세요."
-            elif "quota" in error_str.lower() or "limit" in error_str.lower():
+            elif "quota" in error_str.lower() or "limit" in error_str.lower() or "429" in error_str:
                 return "죄송합니다. 현재 서비스 사용량이 한계에 도달했습니다. 잠시 후 다시 시도해주세요."
             elif "401" in error_str or "unauthorized" in error_str.lower():
                 return "죄송합니다. 현재 시스템에 일시적인 인증 문제가 있습니다. 관리자에게 문의해주세요."

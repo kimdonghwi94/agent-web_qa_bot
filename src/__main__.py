@@ -110,6 +110,16 @@ async def create_app():
     # Create skills from MCP tools
     all_skills = await create_agent_skills(agent_executor.agent.mcp_tools)
 
+    # Add built-in web analyzer skill
+    web_analyzer_skill = AgentSkill(
+        id="web_analyzer",
+        name="웹 페이지 분석",
+        description="웹 페이지 URL을 분석하여 마크다운 형식으로 내용을 추출합니다",
+        tags=["web", "analyzer", "url", "markdown"],
+        examples=["https://example.com 이 사이트를 분석해주세요"]
+    )
+    all_skills.append(web_analyzer_skill)
+
     # Add custom skills from config
     config_skills = agent_config.get("skills", [])
     for skill_config in config_skills:
