@@ -51,16 +51,10 @@ class Config:
             },
             "skills": [
                 {
-                    "id": "donghwi_qa",
-                    "name": "김동휘 질의응답",
-                    "description": "김동휘에 대한 개인정보, 경력, 프로젝트 질의응답",
+                    "id": "personal_qa",
+                    "name": "사용자 질의응답",
+                    "description": "사용자에 대한 개인정보, 경력, 프로젝트 질의응답",
                     "tags": ["김동휘", "AI개발자", "한국어", "QA"]
-                },
-                {
-                    "id": "context_qa",
-                    "name": "컨텍스트 기반 QA",
-                    "description": "제공된 컨텍스트를 활용한 질의응답",
-                    "tags": ["context", "qa", "korean"]
                 }
             ]
         }
