@@ -43,6 +43,7 @@ class QAAgent:
         self.client = None  # Will be Google or OpenAI client
         self.mcp_tools = {}
         self.web_analyzer = WebAnalyzerSkill()
+        self.prompts = QAPrompts()  # Initialize prompts with cached system prompt
 
         # Configuration
         self.config = Config()
@@ -173,10 +174,8 @@ class QAAgent:
                     break
 
             elif action == "respond_directly":
-                # Generate final response
-                response = decision.get('response', '')
-                if not response:
-                    response = await self._generate_final_response(query, executed_actions, current_context)
+                # Always generate final response using proper QA prompts
+                response = await self._generate_final_response(query, executed_actions, current_context)
                 logger.info("[INTERNAL] Generated final response")
                 return response
 
@@ -390,7 +389,7 @@ class QAAgent:
                 response = await self.client.chat.completions.create(
                     model=self.config.LLM_MODEL,
                     messages=[
-                        {"role": "system", "content": QAPrompts.SYSTEM_PROMPT},
+                        {"role": "system", "content": self.prompts.SYSTEM_PROMPT},
                         {"role": "user", "content": final_prompt}
                     ],
                     temperature=self.config.TEMPERATURE,
@@ -399,10 +398,12 @@ class QAAgent:
                 return response.choices[0].message.content
             else:
                 # Use Google GenAI API
+                # Combine system prompt with final prompt for Google API
+                combined_prompt = f"{self.prompts.SYSTEM_PROMPT}\n\n{final_prompt}"
                 response = await asyncio.to_thread(
                     self.client.models.generate_content,
                     model=self.config.LLM_MODEL,
-                    contents=final_prompt,
+                    contents=combined_prompt,
                     config=types.GenerateContentConfig(
                         temperature=self.config.TEMPERATURE,
                         top_p=0.95,
@@ -444,7 +445,7 @@ class QAAgent:
                 response = await self.client.chat.completions.create(
                     model=self.config.LLM_MODEL,
                     messages=[
-                        {"role": "system", "content": QAPrompts.SYSTEM_PROMPT},
+                        {"role": "system", "content": self.prompts.SYSTEM_PROMPT},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=self.config.TEMPERATURE,

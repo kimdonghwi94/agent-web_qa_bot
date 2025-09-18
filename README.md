@@ -20,25 +20,46 @@ cd agent-web_qa_bot
 uv sync
 ```
 
-### 3. 환경 설정
+### 3. 개인정보 프롬프트 설정
+
+개인화된 QA 챗봇을 위해 프롬프트 파일을 설정하세요:
+
+```bash
+# 예시 파일을 복사하여 개인 프롬프트 파일 생성
+cp src/prompts/qa_system_prompt.example.txt src/prompts/qa_system_prompt.txt
+
+# 개인정보로 수정
+nano src/prompts/qa_system_prompt.txt
+```
+
+`qa_system_prompt.txt` 파일에서 다음을 개인 정보로 변경:
+- 기본 정보 (이름, 연락처, 학력 등)
+- 현재 업무 및 전문 분야
+- 진행 중인 프로젝트
+- 과거 성과 및 경력
+
+### 4. 환경 설정
 
 `.env` 파일을 생성하고 다음 내용을 추가:
 
 ```env
-# 필수: Google API Key
-GOOGLE_API_KEY=your_google_api_key_here
+# 플랫폼 선택 (GOOGLE 또는 OPENAI)
+PLATFORM=GOOGLE
 
-# 선택사항: 서버 설정
+# API 키 (플랫폼에 따라 설정)
+GOOGLE_API_KEY=your_google_api_key_here
+OPENAI_API_KEY=your_openai_api_key_here
+
+# 서버 설정
 HOST=0.0.0.0
 PORT=8000
 
-# 선택사항: LLM 설정
-LLM_MODEL=gemini-1.5-flash-latest
+# LLM 설정
 TEMPERATURE=0.7
 MAX_CONTEXT_LENGTH=4000
 ```
 
-### 4. 서버 실행
+### 5. 서버 실행
 
 ```bash
 # 기본 포트 (8000)에서 실행
