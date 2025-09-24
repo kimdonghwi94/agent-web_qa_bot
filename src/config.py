@@ -26,11 +26,6 @@ class Config:
     else:  # GOOGLE
         LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-1.5-flash-latest")
 
-    # QA Settings
-    MAX_CONTEXT_LENGTH: int = int(os.getenv("MAX_CONTEXT_LENGTH", "4000"))
-    TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0.7"))
-    TOP_K: int = int(os.getenv("TOP_K", "5"))
-
     # Server Configuration
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
@@ -76,15 +71,6 @@ class Config:
                 return json.load(f)
 
         return {"mcpServers": {}}
-    
-    @classmethod
-    def get_qa_settings(cls) -> dict[str, Any]:
-        """Get QA-specific settings."""
-        return {
-            "max_context_length": cls.MAX_CONTEXT_LENGTH,
-            "temperature": cls.TEMPERATURE,
-            "top_k": cls.TOP_K,
-        }
 
     def __init__(self):
         """Initialize configuration."""

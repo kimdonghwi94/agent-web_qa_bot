@@ -1,8 +1,6 @@
 """QA Executor implementation for Web QA Bot"""
 
 import logging
-import json
-from typing import Dict, Any
 
 from a2a.server.agent_execution import AgentExecutor as BaseAgentExecutor, RequestContext
 from a2a.types import (
@@ -10,8 +8,6 @@ from a2a.types import (
     TaskStatusUpdateEvent,
     TaskState,
     TaskStatus,
-    TextPart,
-    DataPart,
 )
 from a2a.server.events import EventQueue
 from a2a.utils import new_agent_text_message, new_text_artifact
@@ -51,18 +47,11 @@ class QAExecutor(BaseAgentExecutor):
         task_id = getattr(context, 'task_id', getattr(context, 'id', 'default_task'))
 
         try:
-            # Extract context from request (provided by host agent)
-            provided_context = None
-            if hasattr(context, 'metadata') and context.metadata:
-                provided_context = context.metadata.get('context')
-            elif hasattr(context, 'additional_data') and context.additional_data:
-                provided_context = context.additional_data.get('context')
-
             logger.info(f"Processing query: {user_message[:100]}...")
 
             # Process query and stream response
             response_text = ""
-            async for chunk in self.agent.process_query(user_message, context_id, provided_context):
+            async for chunk in self.agent.process_query(user_message):
                 response_text += chunk
 
                 # Send progress update
@@ -148,9 +137,9 @@ class QAExecutor(BaseAgentExecutor):
         await event_queue.enqueue_event(
             TaskStatusUpdateEvent(
                 status=TaskStatus(
-                    state=TaskState.cancelled,
+                    state=TaskState.canceled,
                     message=new_agent_text_message(
-                        "Operation cancelled.",
+                        "Operation canceled.",
                         context_id,
                         task_id,
                     ),

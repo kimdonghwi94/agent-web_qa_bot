@@ -36,7 +36,6 @@ class QAAgent:
         self.agent_name = "Web QA Bot"
         self.agent_description = "Intelligent Web Question Answering Agent"
         self._initialized = False
-        self.conversation_history: Dict[str, List[Dict[str, str]]] = {}
 
         # Components
         self.mcp_client: Optional[MCPRunnerClient] = None
@@ -87,33 +86,26 @@ class QAAgent:
             logger.error(f"Failed to initialize Web QA Bot: {e}")
             raise
     
-    async def process_query(self, query: str, context_id: str, context: str = None) -> AsyncGenerator[str, None]:
+    async def process_query(self, query: str) -> AsyncGenerator[str, None]:
         """Process a user query using intelligent agent reasoning - SECURE VERSION"""
         try:
-            # Get conversation history
-            history = self.conversation_history.get(context_id, [])
-
             # **CRITICAL**: All agent processing happens silently
             # User only sees final result - NO internal logic exposure
-            final_response = await self._execute_agent_internally(query, history, context)
+            final_response = await self._execute_agent_internally(query)
 
             # Stream only the final response to user
             async for chunk in self._stream_response(final_response):
                 yield chunk
 
-            # Update conversation history
-            await self._update_conversation_history(context_id, query, final_response)
-
         except Exception as e:
             logger.error(f"Error in agent processing: {e}")
             yield "죄송합니다. 질문을 처리하는 중에 예상치 못한 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
 
-    async def _execute_agent_internally(self, query: str, history: List[Dict[str, str]], context: str = None) -> str:
+    async def _execute_agent_internally(self, query: str) -> str:
         """Internal agent execution - completely hidden from user"""
         max_iterations = 5
         iteration = 0
         executed_actions = []
-        current_context = context or ""
 
         logger.info("[INTERNAL] Starting agent reasoning loop")
 
@@ -130,15 +122,11 @@ class QAAgent:
                 reasoning_prompt = AgentPrompts.generate_reasoning_prompt(
                     user_query=query,
                     available_tools=available_tools,
-                    conversation_history=history[-3:] if history else None,
-                    previous_actions=executed_actions,
-                    context=current_context
                 )
             else:
                 reasoning_prompt = AgentPrompts.generate_followup_prompt(
                     original_query=query,
                     tool_results=executed_actions,
-                    conversation_history=history[-3:] if history else None
                 )
 
             # Get agent decision (internal only)
@@ -148,7 +136,6 @@ class QAAgent:
                 break
 
             action = decision.get('action')
-            reasoning = decision.get('reasoning', '')
             logger.info(f"[INTERNAL] Agent decision: {action}")
             # DO NOT log reasoning details to prevent exposure
 
@@ -175,7 +162,7 @@ class QAAgent:
 
             elif action == "respond_directly":
                 # Always generate final response using proper QA prompts
-                response = await self._generate_final_response(query, executed_actions, current_context)
+                response = await self._generate_final_response(query, executed_actions)
                 logger.info("[INTERNAL] Generated final response")
                 return response
 
@@ -188,7 +175,7 @@ class QAAgent:
 
         # If max iterations reached
         logger.info("[INTERNAL] Max iterations reached, generating final response")
-        final_response = await self._generate_final_response(query, executed_actions, current_context)
+        final_response = await self._generate_final_response(query, executed_actions)
         return final_response
 
     async def _get_available_tools_list(self) -> List[Dict[str, Any]]:
@@ -232,8 +219,6 @@ class QAAgent:
                         {"role": "system", "content": "You are a helpful assistant that responds in JSON format."},
                         {"role": "user", "content": reasoning_prompt}
                     ],
-                    temperature=0.3,
-                    max_tokens=2048,
                     response_format={ "type": "json_object" }
                 )
                 response_text = response.choices[0].message.content
@@ -369,7 +354,7 @@ class QAAgent:
 
         return validated_args
 
-    async def _generate_final_response(self, original_query: str, executed_actions: List[Dict[str, Any]], context: str) -> str:
+    async def _generate_final_response(self, original_query: str, executed_actions: List[Dict[str, Any]]) -> str:
         """Generate final response based on all collected information"""
         try:
             if not self.client:
@@ -379,21 +364,17 @@ class QAAgent:
             final_prompt = AgentPrompts.generate_final_response_prompt(
                 original_query=original_query,
                 all_results=executed_actions,
-                context=context
             )
 
             if self.config.PLATFORM == "OPENAI":
                 # Use OpenAI API
                 # Adjust max_tokens based on model
-                max_tokens = 4096 if "gpt-3.5" in self.config.LLM_MODEL else 8192
                 response = await self.client.chat.completions.create(
                     model=self.config.LLM_MODEL,
                     messages=[
                         {"role": "system", "content": self.prompts.SYSTEM_PROMPT},
                         {"role": "user", "content": final_prompt}
                     ],
-                    temperature=self.config.TEMPERATURE,
-                    max_tokens=max_tokens
                 )
                 return response.choices[0].message.content
             else:
@@ -417,24 +398,6 @@ class QAAgent:
             logger.error(f"Error generating final response: {e}")
             return "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다."
 
-    async def _update_conversation_history(self, context_id: str, query: str, response: str):
-        """Update conversation history"""
-        if context_id not in self.conversation_history:
-            self.conversation_history[context_id] = []
-
-        self.conversation_history[context_id].append({
-            "role": "user",
-            "content": query
-        })
-        self.conversation_history[context_id].append({
-            "role": "assistant",
-            "content": response
-        })
-
-        # Keep only last 10 exchanges
-        if len(self.conversation_history[context_id]) > 20:
-            self.conversation_history[context_id] = self.conversation_history[context_id][-20:]
-    
     async def _generate_llm_response(self, prompt: str) -> str:
         """Generate response using LLM client"""
         try:
@@ -448,8 +411,6 @@ class QAAgent:
                         {"role": "system", "content": self.prompts.SYSTEM_PROMPT},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=self.config.TEMPERATURE,
-                    max_tokens=max_tokens
                 )
                 return response.choices[0].message.content
             else:

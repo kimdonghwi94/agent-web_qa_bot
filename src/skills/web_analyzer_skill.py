@@ -10,7 +10,6 @@ from typing import Optional, Dict, Any, List, Tuple
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup, Comment, Tag
-from difflib import get_close_matches
 
 
 # Tag scoring system for content importance

@@ -1,7 +1,5 @@
 """Main entry point for Web QA Bot Agent"""
 
-import json
-from pathlib import Path
 import asyncio
 
 from a2a.server.apps import A2AStarletteApplication
