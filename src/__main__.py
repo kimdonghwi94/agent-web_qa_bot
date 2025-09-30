@@ -574,9 +574,14 @@ async def create_app():
             if not user_message:
                 return JSONResponse({"error": "Message is required"}, status_code=400)
 
-            # Process query with context
+            # Add context to query if provided
+            query_with_context = user_message
+            if context:
+                query_with_context = f"Context: {context}\n\nQuestion: {user_message}"
+
+            # Process query
             final_response = ""
-            async for chunk in agent_executor.agent.process_query(user_message, context_id, context):
+            async for chunk in agent_executor.agent.process_query(query_with_context):
                 final_response += chunk
 
             response = final_response if final_response else "응답을 생성할 수 없습니다."
